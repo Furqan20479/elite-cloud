@@ -1,0 +1,257 @@
+
+Option Explicit
+
+Sub Import_All_Bookers_STT()
+
+    Dim targetWB As Workbook
+    Dim targetWS As Worksheet
+
+    Dim sourceWB As Workbook
+    Dim sourceWS As Worksheet
+    Dim summaryWS As Worksheet
+
+    Dim folderPath As String
+    Dim fileName As String
+    Dim bookerName As String
+
+    Dim startRow As Variant
+    Dim destRow As Long
+    Dim sheetNo As Long
+    Dim i As Long
+
+    Dim hasBooking As Boolean
+    Dim qty As Variant
+    Dim imported As Long
+    Dim skipped As Long
+
+    Dim oldCalc As XlCalculation
+    Dim importCompleted As Boolean
+    Dim errorMessage As String
+
+    Set targetWB = ThisWorkbook
+    Set targetWS = ActiveSheet
+
+    'Select date folder containing booker files
+    With Application.FileDialog(msoFileDialogFolderPicker)
+
+        .Title = "Select Date Folder Containing Booker Files"
+
+        If .Show <> -1 Then Exit Sub
+
+        folderPath = .SelectedItems(1)
+
+    End With
+
+    If Right(folderPath, 1) <> "\" Then
+        folderPath = folderPath & "\"
+    End If
+
+    'Ask for the first destination row
+    startRow = Application.InputBox( _
+        Prompt:="Enter the first destination row in STT." & vbCrLf & _
+                "Example: 19", _
+        Title:="STT Starting Row", _
+        Default:=19, _
+        Type:=1)
+
+    If VarType(startRow) = vbBoolean Then Exit Sub
+
+    If startRow < 1 Or startRow <> Fix(startRow) Then
+        MsgBox "Please enter a valid starting row.", vbExclamation
+        Exit Sub
+    End If
+
+    destRow = CLng(startRow)
+
+    'Confirm before importing
+    If MsgBox( _
+        "Selected folder:" & vbCrLf & folderPath & vbCrLf & vbCrLf & _
+        "M = Booker Name" & vbCrLf & _
+        "P = Shop Name" & vbCrLf & _
+        "Q = Address" & vbCrLf & _
+        "R = Will remain untouched" & vbCrLf & _
+        "S:X = Quantities" & vbCrLf & _
+        "Starting row: " & destRow & vbCrLf & vbCrLf & _
+        "Existing data in M, P:Q and S:X may be overwritten." & _
+        vbCrLf & vbCrLf & "Continue?", _
+        vbYesNo + vbQuestion, "Confirm STT Import") <> vbYes Then
+
+        Exit Sub
+
+    End If
+
+    oldCalc = Application.Calculation
+
+    On Error GoTo ImportError
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    'Scan all Excel files in the selected date folder
+    fileName = Dir(folderPath & "*.xls*")
+
+    Do While fileName <> ""
+
+        'Ignore temporary Excel files
+        If Left(fileName, 2) <> "~$" Then
+
+            'Ignore the destination workbook if present
+            If StrComp(folderPath & fileName, _
+                       targetWB.FullName, vbTextCompare) <> 0 Then
+
+                Set sourceWB = Workbooks.Open( _
+                    fileName:=folderPath & fileName, _
+                    ReadOnly:=True, _
+                    UpdateLinks:=0, _
+                    AddToMru:=False)
+
+                'Get booker name from Summary!H2
+                Set summaryWS = Nothing
+
+                On Error Resume Next
+                Set summaryWS = sourceWB.Worksheets("Summary")
+                On Error GoTo ImportError
+
+                If summaryWS Is Nothing Then
+                    Err.Raise vbObjectError + 101, , _
+                        "Summary sheet not found in file: " & fileName
+                End If
+
+                bookerName = Trim(CStr(summaryWS.Range("H2").Value))
+
+                If bookerName = "" Then
+                    Err.Raise vbObjectError + 102, , _
+                        "Booker name is blank in Summary!H2 of: " & fileName
+                End If
+
+                'Check numbered sheets 1 through 30
+                For sheetNo = 1 To 30
+
+                    Set sourceWS = Nothing
+
+                    On Error Resume Next
+                    Set sourceWS = sourceWB.Worksheets(CStr(sheetNo))
+                    On Error GoTo ImportError
+
+                    If Not sourceWS Is Nothing Then
+
+                        'Read quantities from H16:H21
+                        qty = sourceWS.Range("H16:H21").Value2
+
+                        hasBooking = False
+
+                        'Include only if at least one quantity > 0
+                        For i = 1 To 6
+
+                            If Not IsError(qty(i, 1)) Then
+
+                                If IsNumeric(qty(i, 1)) Then
+
+                                    If CDbl(qty(i, 1)) > 0 Then
+                                        hasBooking = True
+                                        Exit For
+                                    End If
+
+                                End If
+
+                            End If
+
+                        Next i
+
+                        If hasBooking Then
+
+                            If destRow > targetWS.Rows.Count Then
+                                Err.Raise vbObjectError + 103, , _
+                                    "No more destination rows available."
+                            End If
+
+                            'Booker Name -> M
+                            targetWS.Cells(destRow, "M").Value = _
+                                bookerName
+
+                            'Shop Name: A6 -> P
+                            targetWS.Cells(destRow, "P").Value = _
+                                sourceWS.Range("A6").Value
+
+                            'Address: A8 -> Q
+                            targetWS.Cells(destRow, "Q").Value = _
+                                sourceWS.Range("A8").Value
+
+                            'R remains untouched
+                            'Quantities: H16:H21 -> S:X
+                            For i = 1 To 6
+
+                                targetWS.Cells(destRow, 18 + i).Value = _
+                                    qty(i, 1)
+
+                            Next i
+
+                            'Next booked shop goes to next row
+                            destRow = destRow + 1
+                            imported = imported + 1
+
+                        Else
+
+                            'Skip sheets with zero/blank quantities
+                            skipped = skipped + 1
+
+                        End If
+
+                    End If
+
+                Next sheetNo
+
+                sourceWB.Close SaveChanges:=False
+                Set sourceWB = Nothing
+
+            End If
+
+        End If
+
+        fileName = Dir()
+
+    Loop
+
+    importCompleted = True
+    GoTo CleanUp
+
+ImportError:
+
+    errorMessage = Err.Description
+    importCompleted = False
+
+CleanUp:
+
+    On Error Resume Next
+
+    If Not sourceWB Is Nothing Then
+        sourceWB.Close SaveChanges:=False
+    End If
+
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.Calculation = oldCalc
+
+    On Error GoTo 0
+
+    If importCompleted Then
+
+        MsgBox "STT Import Completed Successfully!" & vbCrLf & vbCrLf & _
+               "Booked shops imported: " & imported & vbCrLf & _
+               "Zero/blank sheets skipped: " & skipped & vbCrLf & _
+               "Next available row: " & destRow, _
+               vbInformation, "Import Complete"
+
+    Else
+
+        MsgBox "Import stopped due to an error:" & vbCrLf & _
+               errorMessage & vbCrLf & vbCrLf & _
+               "Please check the destination data before running again.", _
+               vbExclamation, "Import Error"
+
+    End If
+
+End Sub
+
+
