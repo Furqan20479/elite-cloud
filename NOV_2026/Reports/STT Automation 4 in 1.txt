@@ -22,6 +22,7 @@ Sub Import_All_Bookers_STT()
     Dim hasBooking As Boolean
     Dim qty As Variant
     Dim amount As Variant
+
     Dim imported As Long
     Dim skipped As Long
 
@@ -32,7 +33,7 @@ Sub Import_All_Bookers_STT()
     Set targetWB = ThisWorkbook
     Set targetWS = ActiveSheet
 
-    'Select date folder
+    ' Select date folder
     With Application.FileDialog(msoFileDialogFolderPicker)
 
         .Title = "Select Date Folder Containing Booker Files"
@@ -47,7 +48,7 @@ Sub Import_All_Bookers_STT()
         folderPath = folderPath & "\"
     End If
 
-    'Starting row
+    ' Starting row
     startRow = Application.InputBox( _
         Prompt:="Enter the first destination row in STT." & vbCrLf & _
                 "Example: 19", _
@@ -64,14 +65,15 @@ Sub Import_All_Bookers_STT()
 
     destRow = CLng(startRow)
 
-    'Confirmation
+    ' Confirmation
     If MsgBox( _
         "Selected folder:" & vbCrLf & folderPath & vbCrLf & vbCrLf & _
         "M = Booker Name" & vbCrLf & _
         "P = Shop Name" & vbCrLf & _
         "Q = Address" & vbCrLf & _
-        "R = G23 Amount x 4" & vbCrLf & _
-        "S:X = Quantities" & vbCrLf & _
+        "R = H23 Amount x 4" & vbCrLf & _
+        "S:X = Quantities H16:H21" & vbCrLf & _
+        "H22 = Ignored" & vbCrLf & _
         "Starting row: " & destRow & vbCrLf & vbCrLf & _
         "Existing data in M, P:R and S:X may be overwritten." & _
         vbCrLf & vbCrLf & "Continue?", _
@@ -89,7 +91,7 @@ Sub Import_All_Bookers_STT()
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
 
-    'Scan Excel files
+    ' Scan Excel files
     fileName = Dir(folderPath & "*.xls*")
 
     Do While fileName <> ""
@@ -105,7 +107,7 @@ Sub Import_All_Bookers_STT()
                     UpdateLinks:=0, _
                     AddToMru:=False)
 
-                'Booker name from Summary H2
+                ' Booker name from Summary H2
                 Set summaryWS = Nothing
 
                 On Error Resume Next
@@ -124,7 +126,7 @@ Sub Import_All_Bookers_STT()
                         "Booker name is blank in Summary!H2: " & fileName
                 End If
 
-                'Check sheets 1 to 30
+                ' Check sheets 1 to 30
                 For sheetNo = 1 To 30
 
                     Set sourceWS = Nothing
@@ -135,11 +137,12 @@ Sub Import_All_Bookers_STT()
 
                     If Not sourceWS Is Nothing Then
 
-                        'Read H16:H21
+                        ' Read H16:H21
                         qty = sourceWS.Range("H16:H21").Value2
 
                         hasBooking = False
 
+                        ' Check H16:H21
                         For i = 1 To 6
 
                             If Not IsError(qty(i, 1)) Then
@@ -157,6 +160,21 @@ Sub Import_All_Bookers_STT()
 
                         Next i
 
+                        ' Check H23 (H22 ignored)
+                        amount = sourceWS.Range("H23").Value2
+
+                        If Not IsError(amount) Then
+
+                            If IsNumeric(amount) Then
+
+                                If CDbl(amount) > 0 Then
+                                    hasBooking = True
+                                End If
+
+                            End If
+
+                        End If
+
                         If hasBooking Then
 
                             If destRow > targetWS.Rows.Count Then
@@ -164,21 +182,19 @@ Sub Import_All_Bookers_STT()
                                     "No more destination rows available."
                             End If
 
-                            'Booker Name -> M
+                            ' Booker Name -> M
                             targetWS.Cells(destRow, "M").Value = _
                                 bookerName
 
-                            'Shop Name A6 -> P
+                            ' Shop Name A6 -> P
                             targetWS.Cells(destRow, "P").Value = _
                                 sourceWS.Range("A6").Value
 
-                            'Address A8 -> Q
+                            ' Address A8 -> Q
                             targetWS.Cells(destRow, "Q").Value = _
                                 sourceWS.Range("A8").Value
 
-                            'Amount G23 x 4 -> R
-                            amount = sourceWS.Range("G23").Value2
-
+                            ' Amount H23 x 4 -> R
                             If Not IsError(amount) And _
                                Len(Trim(CStr(amount))) > 0 And _
                                IsNumeric(amount) Then
@@ -192,7 +208,7 @@ Sub Import_All_Bookers_STT()
 
                             End If
 
-                            'Quantities H16:H21 -> S:X
+                            ' Quantities H16:H21 -> S:X
                             For i = 1 To 6
 
                                 targetWS.Cells(destRow, 18 + i).Value = _
